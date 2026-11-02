@@ -116,5 +116,6 @@ export function calculate(config: Config, input: CalcInput) {
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
     cachePercent: input.cachePercent,
+    peakWindows: config.peakWindows,
   };
 }

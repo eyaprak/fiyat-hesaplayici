@@ -84,4 +84,5 @@ export interface CalcResult {
   inputTokens: number;
   outputTokens: number;
   cachePercent: number;
+  peakWindows: PeakWindow[];
 }

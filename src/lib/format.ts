@@ -1,11 +1,16 @@
-/** Dolar tutarını Türkçe biçimde yazar: $1.234,5678 */
+/** Dolar tutarını Türkçe biçimde, tek ondalık düzeniyle yazar: $1.234,5678 */
 export function formatUsd(value: number): string {
   if (!Number.isFinite(value)) return "—";
-  if (value === 0) return "$0,00";
-  const digits = value >= 1 ? 4 : value >= 0.01 ? 6 : 8;
+  // 4 hane yetmeyen çok küçük tutarlar sıfır görünmesin.
+  const digits = value > 0 && value < 0.0001 ? 6 : 4;
   const [whole, fraction] = value.toFixed(digits).split(".");
   const grouped = new Intl.NumberFormat("tr-TR").format(Number(whole));
   return `$${grouped},${fraction}`;
+}
+
+/** En ucuza göre kat: 2,7 */
+export function formatMultiplier(value: number): string {
+  return value.toFixed(1).replace(".", ",");
 }
 
 export function formatTokens(value: number): string {
@@ -13,9 +18,11 @@ export function formatTokens(value: number): string {
   return new Intl.NumberFormat("tr-TR").format(Math.round(value));
 }
 
+/** Birim fiyat: en az 2 ondalık, gereksiz sıfırlar atılır ($0,10, $0,003, $20,00) */
 export function formatPerMillion(value: number): string {
-  const fixed = value >= 1 ? value.toFixed(2) : value.toFixed(value >= 0.01 ? 3 : 4);
-  return `$${fixed.replace(".", ",")}`;
+  if (value >= 1) return `$${value.toFixed(2).replace(".", ",")}`;
+  const [whole, fraction] = value.toFixed(4).split(".");
+  return `$${whole},${fraction.replace(/0+$/, "").padEnd(2, "0")}`;
 }
 
 export function formatMinutes(minutes: number): string {

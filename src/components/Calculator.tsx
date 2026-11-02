@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CalcResult, CalcRow } from "@/lib/types";
-import { formatPerMillion, formatTokens, formatUsd, nowInIstanbul } from "@/lib/format";
+import type { CalcResult, CalcRow, PeakWindow } from "@/lib/types";
+import {
+  formatMinutes,
+  formatMultiplier,
+  formatPerMillion,
+  formatTokens,
+  formatUsd,
+  nowInIstanbul,
+} from "@/lib/format";
 
 type Form = {
   inputTokens: string;
@@ -12,36 +19,95 @@ type Form = {
   time: string;
 };
 
+type Calculated = CalcResult & { date: string; time: string };
+
 const LOGO_FALLBACK: Record<string, string> = {
   Anthropic: "A",
   DeepSeek: "D",
 };
+
+const WEEKDAYS = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+const RULER = [0, 6, 12, 18, 24];
+const DAY_MINUTES = 1440;
 
 function Logo({ row }: { row: CalcRow }) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
     return (
-      <span className="logo logo-fallback" style={{ background: row.accent }}>
+      <span className="logo logo-fallback" style={{ color: row.accent }}>
         {LOGO_FALLBACK[row.companyName] ?? row.companyName.charAt(0)}
       </span>
     );
   }
 
   return (
-    <span className="logo" style={{ borderColor: `${row.accent}55` }}>
+    <span className="logo">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={row.logo} alt={`${row.companyName} logosu`} onError={() => setFailed(true)} />
     </span>
   );
 }
 
-function startOfToday() {
-  return nowInIstanbul();
+/** Seçilen günün yoğun saat bantlarını ve hesaplanan saati 24 saatlik bir şeritte gösterir. */
+function Tariff({ result }: { result: Calculated }) {
+  const [year, month, day] = result.date.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
+  const isWeekend = weekday === 0 || weekday === 6;
+  const windows = result.peakWindows.filter(
+    (w: PeakWindow) =>
+      w.dayType === "any" || (w.dayType === "weekend" ? isWeekend : !isWeekend),
+  );
+  const [hour, minute] = result.time.split(":").map(Number);
+  const at = ((hour * 60 + minute) / DAY_MINUTES) * 100;
+  const ranges = windows.map((w) => `${formatMinutes(w.startMin)}–${formatMinutes(w.endMin)}`);
+
+  return (
+    <div className={`tariff ${result.peakNow ? "peak" : "offpeak"}`}>
+      <div className="tariff-head">
+        <span className="tariff-state">
+          <span className="dot" aria-hidden="true" />
+          {result.peakNow ? "Yoğun saat" : "Yoğun saat dışı"}
+        </span>
+        <span className="tariff-when">
+          {WEEKDAYS[weekday]} {result.time}
+        </span>
+      </div>
+
+      <div className="tariff-track" role="img" aria-label={`Yoğun saatler: ${ranges.join(", ") || "yok"}`}>
+        {windows.map((w) => (
+          <span
+            key={w.id}
+            className="tariff-band"
+            style={{
+              left: `${(w.startMin / DAY_MINUTES) * 100}%`,
+              width: `${((w.endMin - w.startMin) / DAY_MINUTES) * 100}%`,
+            }}
+          />
+        ))}
+        <span className="tariff-mark" style={{ left: `${at}%` }} />
+      </div>
+
+      <div className="tariff-ruler" aria-hidden="true">
+        {RULER.map((h) => (
+          <span key={h}>{String(h).padStart(2, "0")}</span>
+        ))}
+      </div>
+
+      <p className="tariff-note">
+        DeepSeek API {result.peakNow ? "yoğun saat" : "indirimli"} tarifeyle hesaplandı
+        <span>
+          {ranges.length > 0
+            ? `${isWeekend ? "Hafta sonu" : "Hafta içi"} yoğun saatler ${ranges.join(", ")}`
+            : `${isWeekend ? "Hafta sonu" : "Bu gün"} yoğun saat yok`}
+        </span>
+      </p>
+    </div>
+  );
 }
 
 export default function Calculator() {
-  const initial = useMemo(startOfToday, []);
+  const initial = useMemo(nowInIstanbul, []);
   const [form, setForm] = useState<Form>({
     inputTokens: "100000",
     outputTokens: "20000",
@@ -49,7 +115,7 @@ export default function Calculator() {
     date: initial.date,
     time: initial.time,
   });
-  const [result, setResult] = useState<CalcResult | null>(null);
+  const [result, setResult] = useState<Calculated | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -70,7 +136,7 @@ export default function Calculator() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Hesaplama başarısız");
-      setResult(data as CalcResult);
+      setResult({ ...(data as CalcResult), date: payload.date, time: payload.time });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Beklenmeyen bir hata oluştu");
     } finally {
@@ -98,12 +164,14 @@ export default function Calculator() {
   };
 
   const cheapest = result?.rows[0]?.total ?? 0;
+  const priciest = result?.rows[result.rows.length - 1]?.total ?? 0;
+  const cacheFill = `${Math.min(100, Math.max(0, Number(form.cachePercent) || 0))}%`;
 
   return (
     <div className="layout">
       <section className="card form-card">
-        <h2>Kullanım bilgisi</h2>
-        <p className="muted">Değerleri girin, maliyetler anında karşılaştırılsın.</p>
+        <h2>Kullanım</h2>
+        <p className="muted">Token sayılarını ve isteğin zamanını girin</p>
 
         <form onSubmit={onSubmit} className="form">
           <label className="field">
@@ -130,38 +198,42 @@ export default function Calculator() {
             />
           </label>
 
-          <label className="field">
-            <span>
-              Önbellekten gelen giriş oranı
-              <strong className="field-value">%{form.cachePercent || 0}</strong>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={form.cachePercent}
-              onChange={update("cachePercent")}
-            />
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              className="range-number"
-              value={form.cachePercent}
-              onChange={update("cachePercent")}
-            />
-          </label>
+          <div className="field">
+            <span>Önbellekten gelen giriş oranı</span>
+            <div className="range-row">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                aria-label="Önbellekten gelen giriş oranı"
+                style={{ "--fill": cacheFill } as React.CSSProperties}
+                value={form.cachePercent}
+                onChange={update("cachePercent")}
+              />
+              <span className="range-number">
+                <span aria-hidden="true">%</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  aria-label="Önbellek oranı, yüzde"
+                  value={form.cachePercent}
+                  onChange={update("cachePercent")}
+                />
+              </span>
+            </div>
+          </div>
 
           <div className="field-row">
             <label className="field">
-              <span>Tarih (Türkiye saati)</span>
+              <span>Tarih</span>
               <input type="date" value={form.date} onChange={update("date")} required />
             </label>
 
             <label className="field">
-              <span>Saat (Türkiye saati)</span>
+              <span>Saat (Türkiye)</span>
               <input type="time" value={form.time} onChange={update("time")} required />
             </label>
           </div>
@@ -178,92 +250,89 @@ export default function Calculator() {
           {error && <p className="error">{error}</p>}
         </form>
 
-        {result && (
-          <div className={`peak-badge ${result.peakNow ? "peak" : "offpeak"}`}>
-            <span className="dot" />
-            {result.peakNow
-              ? "Bu tarih ve saat yoğun saat aralığında — DeepSeek API fiyatı yoğun tarifeyle hesaplandı."
-              : "Bu tarih ve saat yoğun saat dışında — DeepSeek API indirimli tarifeyle hesaplandı."}
-          </div>
-        )}
+        {result && <Tariff result={result} />}
       </section>
 
       <section className="card results-card">
         <div className="results-head">
           <div>
             <h2>Model maliyetleri</h2>
-            <p className="muted">En ucuzdan en pahalıya sıralı.</p>
+            <p className="muted">En ucuzdan en pahalıya sıralı</p>
           </div>
           {result && (
             <div className="summary">
               <span className="summary-label">Toplam token</span>
-              <strong>
-                {formatTokens(result.inputTokens + result.outputTokens)}
-              </strong>
+              <strong>{formatTokens(result.inputTokens + result.outputTokens)}</strong>
             </div>
           )}
         </div>
 
-        <div className="table-wrap">
-          <table className="results">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th className="num">Giriş</th>
-                <th className="num">Önbellek</th>
-                <th className="num">Çıkış</th>
-                <th className="num total-col">Toplam</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result?.rows.map((row, index) => (
-                <tr key={`${row.modelId}-${row.priceLabel}`} className={index === 0 ? "best" : ""}>
-                  <td>
-                    <div className="model-cell">
-                      <Logo row={row} />
-                      <div className="model-text">
-                        <strong>
-                          {row.modelName}
-                          {row.route && <span className="route">{row.route}</span>}
-                        </strong>
-                        <span className="model-meta">
-                          {row.companyName} · {row.priceLabel}
-                          <span className="per-million">
-                            {formatPerMillion(row.inputPrice)} / {formatPerMillion(row.outputPrice)}{" "}
-                            / {formatPerMillion(row.cacheReadPrice)}
-                          </span>
-                        </span>
-                      </div>
-                      {index === 0 && <span className="cheapest-tag">En ucuz</span>}
-                    </div>
-                  </td>
-                  <td className="num">{formatUsd(row.costInput)}</td>
-                  <td className="num">{formatUsd(row.costCache)}</td>
-                  <td className="num">{formatUsd(row.costOutput)}</td>
-                  <td className="num total-col">
-                    <div className="total-stack">
-                      <strong>{formatUsd(row.total)}</strong>
-                      {cheapest > 0 && index > 0 && (
-                        <span className="multiplier">{row.total === 0 ? "—" : `${(row.total / cheapest).toFixed(1)}×`}</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!result && (
-                <tr>
-                  <td colSpan={5} className="empty">
-                    Hesaplama bekleniyor…
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="results" role="table" aria-label="Model maliyetleri">
+          <div className="results-row results-header" role="row">
+            <span role="columnheader">Model</span>
+            <span role="columnheader" className="num part">Giriş</span>
+            <span role="columnheader" className="num part">Önbellek</span>
+            <span role="columnheader" className="num part">Çıkış</span>
+            <span role="columnheader" className="num">Toplam</span>
+          </div>
+
+          {result?.rows.map((row, index) => (
+            <div
+              key={`${row.modelId}-${row.priceLabel}`}
+              role="row"
+              className={`results-row${index === 0 ? " best" : ""}`}
+            >
+              <div role="cell" className="model-cell">
+                <Logo row={row} />
+                <div className="model-text">
+                  <strong>
+                    {row.modelName}
+                    {row.route && <span className="route">{row.route}</span>}
+                  </strong>
+                  <span className="model-meta">
+                    {row.companyName} · {row.priceLabel}
+                  </span>
+                  <span className="per-million">
+                    giriş {formatPerMillion(row.inputPrice)} · çıkış{" "}
+                    {formatPerMillion(row.outputPrice)} · önbellek{" "}
+                    {formatPerMillion(row.cacheReadPrice)}
+                  </span>
+                </div>
+              </div>
+              <span role="cell" className="num part">{formatUsd(row.costInput)}</span>
+              <span role="cell" className={`num part${row.costCache === 0 ? " zero" : ""}`}>
+                {row.costCache === 0 ? "—" : formatUsd(row.costCache)}
+              </span>
+              <span role="cell" className="num part">{formatUsd(row.costOutput)}</span>
+              <div role="cell" className="num total">
+                <strong>{formatUsd(row.total)}</strong>
+                <span className="multiplier">
+                  {index === 0
+                    ? "En ucuz"
+                    : cheapest > 0
+                      ? `en ucuzun ${formatMultiplier(row.total / cheapest)} katı`
+                      : "—"}
+                </span>
+              </div>
+              <span className="bar" aria-hidden="true">
+                <span
+                  className="bar-fill"
+                  style={{ transform: `scaleX(${priciest > 0 ? row.total / priciest : 0})` }}
+                />
+              </span>
+            </div>
+          ))}
+
+          {!result && (
+            <div className="empty" role="row">
+              <span role="cell">Hesaplama bekleniyor…</span>
+            </div>
+          )}
         </div>
 
         <div className="legend">
-          <span>Giriş ve önbellek sütunları toplam giriş token&apos;ını paylaşır.</span>
-          <span>Fiyatlar 1M token başına dolar.</span>
+          <span>Giriş ve önbellek sütunları toplam giriş token&apos;ını paylaşır</span>
+          <span>Birim fiyatlar 1M token başına dolar</span>
         </div>
       </section>
     </div>
