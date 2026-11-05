@@ -6,7 +6,7 @@ const sans = Geist({ subsets: ["latin", "latin-ext"], variable: "--font-sans" })
 const mono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "Model Fiyat Hesaplayıcı",
+  title: "Yapay Zeka Fiyat Hesaplayıcı",
   description:
     "Claude ve DeepSeek modellerinin token maliyetini Türkiye saatiyle, yoğun saat farklarıyla birlikte hesaplayın.",
 };

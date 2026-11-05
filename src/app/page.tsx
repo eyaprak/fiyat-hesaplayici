@@ -10,7 +10,7 @@ export default function Page() {
             ₺
           </span>
           <div>
-            <h1>Model Fiyat Hesaplayıcı</h1>
+            <h1>Yapay Zeka Fiyat Hesaplayıcı</h1>
             <p>Token maliyetini model model, saat saat karşılaştırın</p>
           </div>
         </div>
